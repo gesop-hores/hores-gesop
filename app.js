@@ -117,6 +117,8 @@
     if (m.includes("row-level security")) return "No tens permís per fer això.";
     if (m.includes("Invalid login credentials")) return "Usuari o contrasenya incorrectes.";
     if (m.includes("already registered") || m.includes("already been registered")) return "Aquest usuari ja existeix.";
+    if (m.includes("email rate limit")) return "Supabase intenta enviar correus: desactiva 'Confirm email' (Authentication > Sign In / Providers > Email) i torna-ho a provar d'aquí a uns minuts.";
+    if (m.includes("rate limit") || m.includes("For security purposes")) return "Massa peticions seguides: espera un parell de minuts i torna-ho a provar.";
     if (m.includes("Failed to fetch")) return "No hi ha connexió amb el servidor. Torna-ho a provar.";
     return m;
   }
@@ -283,6 +285,58 @@
     ({ meves: vistaMeves, exportar: vistaExportar, tots: vistaTots, usuaris: vistaUsuaris, llistes: vistaLlistes }[S.pestanya])();
   }
 
+  // ------------------------------------------------------------------ cercador de projectes
+  // Busca en qualsevol part del text, sense distingir majúscules ni accents, amb diverses paraules
+  const normalitza = (t) => String(t || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  function initCombo(input, llista, opcions, enTriar) {
+    let actiu = -1, vistes = [];
+    const obre = (o) => { llista.classList.toggle("ocult", !o); input.setAttribute("aria-expanded", o ? "true" : "false"); };
+    const pinta = () => {
+      const q = normalitza(input.value).split(/\s+/).filter(Boolean);
+      const totes = opcions();
+      const exacta = totes.includes(input.value);
+      vistes = (exacta || !q.length) ? totes : totes.filter((o) => { const n = normalitza(o); return q.every((p) => n.includes(p)); });
+      actiu = vistes.length ? 0 : -1;
+      const max = vistes.slice(0, 80);
+      llista.innerHTML = !vistes.length ? `<li class="combo-buit">Cap projecte coincideix</li>`
+        : max.map((o, i) => `<li role="option" data-i="${i}" class="${i === actiu ? "actiu" : ""}">${esc(o)}</li>`).join("") +
+          (vistes.length > 80 ? `<li class="combo-buit">… ${vistes.length - 80} més: escriu més per afinar</li>` : "");
+      obre(true);
+    };
+    const marca = () => $$("li[data-i]", llista).forEach((li) => {
+      li.classList.toggle("actiu", +li.dataset.i === actiu);
+      if (+li.dataset.i === actiu) li.scrollIntoView({ block: "nearest" });
+    });
+    const tria = (i) => {
+      if (i < 0 || i >= vistes.length) return;
+      input.value = vistes[i]; obre(false);
+      input.dispatchEvent(new Event("change")); enTriar && enTriar(vistes[i]);
+    };
+    input.addEventListener("input", pinta);
+    input.addEventListener("focus", () => { input.select(); pinta(); });
+    input.addEventListener("keydown", (e) => {
+      if (llista.classList.contains("ocult") && (e.key === "ArrowDown" || e.key === "ArrowUp")) { pinta(); e.preventDefault(); return; }
+      const n = Math.min(vistes.length, 80);
+      if (e.key === "ArrowDown") { actiu = Math.min(n - 1, actiu + 1); marca(); e.preventDefault(); }
+      else if (e.key === "ArrowUp") { actiu = Math.max(0, actiu - 1); marca(); e.preventDefault(); }
+      else if (e.key === "Enter") { if (!llista.classList.contains("ocult") && actiu >= 0) { tria(actiu); e.preventDefault(); } }
+      else if (e.key === "Escape") { obre(false); }
+      else if (e.key === "Tab" && !llista.classList.contains("ocult") && actiu >= 0 && input.value && !opcions().includes(input.value)) { tria(actiu); }
+    });
+    llista.addEventListener("mousedown", (e) => {
+      const li = e.target.closest("li[data-i]"); if (!li) return;
+      e.preventDefault(); tria(+li.dataset.i);
+    });
+    input.addEventListener("blur", () => setTimeout(() => {
+      obre(false);
+      // si el text coincideix (sense accents/majúscules) amb un projecte, es completa
+      if (input.value && !opcions().includes(input.value)) {
+        const ok = opcions().filter((o) => normalitza(o) === normalitza(input.value.trim()));
+        if (ok.length === 1) { input.value = ok[0]; input.dispatchEvent(new Event("change")); }
+      }
+    }, 150));
+  }
+
   // ------------------------------------------------------------------ LES MEVES HORES
   // Llegeix quantitat / inici / final del formulari i decideix què es desa
   function calculaTemps() {
@@ -326,8 +380,10 @@
           <label for="f-data">Data</label>
           <input type="date" id="f-data" value="${avui()}">
           <label for="f-proj">Projecte</label>
-          <input type="text" id="f-proj" list="dl-proj" placeholder="Escriu per cercar…" autocomplete="off">
-          <datalist id="dl-proj">${S.llistes.projecte.map((p) => `<option value="${esc(p)}">`).join("")}</datalist>
+          <div class="combo">
+            <input type="text" id="f-proj" placeholder="Escriu per cercar (nom o codi)…" autocomplete="off" role="combobox" aria-expanded="false" aria-controls="f-proj-llista">
+            <ul id="f-proj-llista" class="combo-llista ocult" role="listbox"></ul>
+          </div>
           <label for="f-tasca">Tasca</label>
           <select id="f-tasca"><option value="">— tria primer el projecte —</option></select>
           <label for="f-desc">Descripció</label>
@@ -370,6 +426,7 @@
     };
     proj.addEventListener("input", () => omplirTasques(tasca.value));
     proj.addEventListener("change", () => omplirTasques(tasca.value));
+    initCombo(proj, $("#f-proj-llista"), () => S.llistes.projecte, () => { omplirTasques(""); tasca.focus(); });
     const durada = () => {
       const qEl = $("#f-quant");
       const i = parseHora($("#f-ini").value), f = parseHora($("#f-fin").value);
@@ -733,7 +790,18 @@
     const tmp = window.supabase.createClient(C.SUPABASE_URL, C.SUPABASE_ANON_KEY, {
       auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false, storageKey: `hores-tmp-${Date.now()}-${Math.random()}` }
     });
-    const { data, error } = await tmp.auth.signUp({ email: emailDe(usuari), password: pwd });
+    // Supabase limita les altes seguides: si demana esperar, s'espera i es reintenta
+    let data, error;
+    for (let intent = 0; intent < 4; intent++) {
+      ({ data, error } = await tmp.auth.signUp({ email: emailDe(usuari), password: pwd }));
+      const m = (error && error.message) || "";
+      const espera = m.match(/after (\d+) seconds/);
+      if (error && (espera || /rate limit/i.test(m)) && !/email rate limit/i.test(m)) {
+        await new Promise((r) => setTimeout(r, (espera ? +espera[1] + 1 : 15 * (intent + 1)) * 1000));
+        continue;
+      }
+      break;
+    }
     if (error) throw error;
     if (!data.user) throw new Error("Supabase no ha retornat l'usuari");
     if (!data.session) throw new Error("Cal desactivar 'Confirm email' a Supabase (Authentication > Providers > Email)");
@@ -803,10 +871,15 @@
       if (!linies.length) return toast("No hi ha cap línia.", "error");
       ev.target.disabled = true; ev.target.textContent = "Creant…";
       const ok = [], errors = [];
-      for (const l of linies) {
+      for (const [n, l] of linies.entries()) {
         const [usuari, ...resta] = l.split(";");
+        ev.target.textContent = `Creant ${n + 1} de ${linies.length}…`;
         try { ok.push(await creaUsuari(usuari, resta.join(";"))); }
-        catch (e) { errors.push(`${usuari}: ${missatgeError(e)}`); }
+        catch (e) {
+          errors.push(`${usuari}: ${missatgeError(e)}`);
+          if (/email rate limit/i.test(e.message || "")) break;   // no té sentit continuar fins que es desactivi
+        }
+        await new Promise((r) => setTimeout(r, 1500));   // pausa entre altes per no topar amb el límit
       }
       await vistaUsuaris();
       if (ok.length) mostraContrasenyes(ok);

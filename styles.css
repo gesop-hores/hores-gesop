@@ -91,6 +91,16 @@ main { padding: 20px 22px; max-width: 1400px; margin: 0 auto; }
 .check input { width: auto; }
 .llista-persones { max-height: 190px; overflow-y: auto; border: 1px solid #d0d7e2; border-radius: var(--radi); padding: 4px 8px; background: #fff; }
 
+/* ---------- cercador de projectes ---------- */
+.combo { position: relative; }
+.combo-llista { position: absolute; z-index: 30; left: 0; right: 0; top: calc(100% + 2px); margin: 0; padding: 4px 0;
+  list-style: none; background: #fff; border: 1px solid var(--vora); border-radius: var(--radi);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, .15); max-height: 280px; overflow-y: auto; }
+.combo-llista.ocult { display: none; }
+.combo-llista li { padding: 7px 12px; cursor: pointer; font-size: .92em; }
+.combo-llista li.actiu, .combo-llista li[data-i]:hover { background: var(--gesop-clar); color: var(--gesop-fosc); }
+.combo-llista li.combo-buit { color: var(--gris); cursor: default; font-style: italic; }
+
 /* ---------- comptadors d'hores acumulades ---------- */
 .comptadors { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 18px; }
 .comptador { background: var(--blanc); border: 1px solid var(--vora); border-left: 4px solid var(--gesop);
